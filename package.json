@@ -28,10 +28,11 @@
     "jest": "^24.9.0",
     "ts-jest": "^24.1.0",
     "ts-node": "^10.5.0",
+    "@types/uuid": "^8.3.4",
     "typescript": "latest"
   },
   "dependencies": {
-    "@types/uuid": "^8.3.4",
-    "uuid": "^8.3.2"
+    "uuid": "^8.3.2",
+    "aws-sdk": "latest"
   }
 }

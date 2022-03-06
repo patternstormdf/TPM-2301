@@ -30,7 +30,7 @@ export async function handler(event: APIGatewayProxyEvent, context?: Context): P
                 body: JSON.stringify({error: `method=${event.httpMethod} on resource=${event.resource} is not supported`})
             }
         } else {
-            response = endpoint.execute(event)
+            response = await endpoint.execute(event)
         }
     }
     console.log(`<=Lambda.handler output=${JSON.stringify(response)}`)

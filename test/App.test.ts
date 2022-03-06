@@ -61,7 +61,7 @@ const event: APIGatewayProxyEvent = {
 
 test("create user", async(done) => {
     const user: User.Attributes = {
-        "name": "Claudi Paniagua",
+        "name": "John Smith",
         "longitude": 1234,
         "latitude": 546
     }
@@ -70,6 +70,10 @@ test("create user", async(done) => {
     event.body = JSON.stringify(user)
     const response: Endpoint.Response = await handler(event)
     console.log(JSON.stringify(response))
+    const newUser: User.Attributes = JSON.parse(response.body) as User.Attributes
+    expect(newUser.name).toBe(user.name)
+    expect(newUser.longitude).toBe(user.longitude)
+    expect(newUser.latitude).toBe(user.latitude)
     done()
 })
 
@@ -77,22 +81,22 @@ test("get user", async(done) => {
     event.resource = "/user/{id}"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "27872385325"
+        id: "b7971a00-47a9-4157-b455-c712095a9bae"
     }
     const response: Endpoint.Response = await handler(event)
     console.log(JSON.stringify(response))
     done()
 })
 
-test("update user", async(done) => {
+test("update user location", async(done) => {
     const location: User.Location = {
         "longitude": 666,
-        "latitude": 666
+        "latitude": 777
     }
     event.resource = "/user/{id}"
     event.httpMethod = "PUT"
     event.pathParameters = {
-        id: "7626746724"
+        id: "b7971a00-47a9-4157-b455-c712095a9bae"
     }
     event.body = JSON.stringify(location)
     const response: Endpoint.Response = await handler(event)
@@ -118,7 +122,7 @@ test("get carpool", async(done) => {
     event.resource = "/carpool/{id}"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "672766455"
+        id: "b455e4cd-10af-437b-9733-ceecd5e486bd"
     }
     const response: Endpoint.Response = await handler(event)
     console.log(JSON.stringify(response))
@@ -127,12 +131,12 @@ test("get carpool", async(done) => {
 
 test("add carpool participants", async(done) => {
     const participants: Carpool.Participants = {
-        participants: ["672373472", "3672476234"]
+        participants: ["4659e5f3-9d01-4a97-9f5d-676ee31dffe5", "b7971a00-47a9-4157-b455-c712095a9bae"]
     }
     event.resource = "/carpool/{id}/participants"
     event.httpMethod = "POST"
     event.pathParameters = {
-        id: "763624367"
+        id: "b455e4cd-10af-437b-9733-ceecd5e486bd"
     }
     event.body = JSON.stringify(participants)
     const response: Endpoint.Response = await handler(event)
@@ -144,7 +148,7 @@ test("get carpool participants", async(done) => {
     event.resource = "/carpool/{id}/participants"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "872347672"
+        id: "3bf945c4-e51d-4382-989f-f13ab923786a"
     }
     const response: Endpoint.Response = await handler(event)
     console.log(JSON.stringify(response))

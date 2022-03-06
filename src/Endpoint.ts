@@ -4,7 +4,7 @@ import {APIGatewayProxyResult} from "aws-lambda/trigger/api-gateway-proxy";
 export namespace Endpoint {
     export type Method = "POST" | "GET" | "PUT"
 
-    export type Handler = (event: APIGatewayProxyEvent) => APIGatewayProxyResult
+    export type Handler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>
 
     export type Response = APIGatewayProxyResult
 }
@@ -15,7 +15,7 @@ export class Endpoint {
     handler: Endpoint.Handler
 
     static key(resource: string, method: Endpoint.Method): string {
-        return `${resource}.${method}`
+        return `${method} ${resource}`
     }
 
     constructor(resource: string, method: Endpoint.Method, handler: Endpoint.Handler) {
@@ -28,9 +28,9 @@ export class Endpoint {
         return Endpoint.key(this.resource, this.method)
     }
 
-    execute(event: APIGatewayProxyEvent): Endpoint.Response {
+    async execute(event: APIGatewayProxyEvent): Promise<Endpoint.Response> {
         console.log(`resource=${this.resource} method=${this.method} event=${JSON.stringify(event)}`)
-        const response: Endpoint.Response = this.handler(event)
+        const response: Endpoint.Response = await this.handler(event)
         console.log(`response=${JSON.stringify(response)}`)
         return response
     }
