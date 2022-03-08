@@ -9,11 +9,9 @@ export namespace Application {
         export const name: string = `${prefixId}-db-table`
         export const pkName: string = "PK"
         export const pkType: DynamoDB.Table.AttributeType = "S"
-        export const gsiPkName: string = "Carpool"
-        export const gsiPkType: DynamoDB.Table.AttributeType = "S"
-        export const gsiSkName: string = "Participant"
-        export const gsiSkType: DynamoDB.Table.AttributeType = "S"
-        export const gsiName: string = "Carpool-Participant"
+        export const skName: string = "SK"
+        export const skType: DynamoDB.Table.AttributeType = "S"
+
     }
 }
 

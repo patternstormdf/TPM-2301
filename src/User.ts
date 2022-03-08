@@ -29,10 +29,12 @@ export namespace User {
 
         async function save(user: User): Promise<User> {
             console.log(`Saving user=${JSON.stringify(user)} into DynamoDB...`)
+            const dynamoDBId: string = toDynamoDBId(user.id)
             const input: AWS.DynamoDB.Types.PutItemInput = {
                 TableName: App.Table.name,
                 Item: {
-                    [App.Table.pkName]: {S: toDynamoDBId(user.id)},
+                    [App.Table.pkName]: {S: dynamoDBId},
+                    [App.Table.skName]: {S: dynamoDBId},
                     name: {S: user.name},
                     longitude: {N: user.longitude.toString()},
                     latitude: {N: user.latitude.toString()},
@@ -78,9 +80,13 @@ export namespace User {
     export namespace Get {
 
         async function retrieve(userId: string): Promise<User> {
+            const dynamoDBId: string = toDynamoDBId(userId)
             const input: AWS.DynamoDB.Types.GetItemInput = {
                 TableName: App.Table.name,
-                Key: { [App.Table.pkName]: { S: toDynamoDBId(userId) } }
+                Key: {
+                    [App.Table.pkName]: { S:  dynamoDBId },
+                    [App.Table.skName]: { S:  dynamoDBId }
+                }
             }
             const output: AWS.DynamoDB.Types.GetItemOutput = await ddb.getItem(input).promise()
             if (!isDefined(output.Item)) throw new Error("DynamoDB.getItem returned undefined")
@@ -127,13 +133,19 @@ export namespace User {
 
         async function update(userId: string, location: User.Location): Promise<User.Location> {
             console.log(`Updating user=${JSON.stringify(userId)}'s location to ${JSON.stringify(location)} into DynamoDB...`)
+            const dynamoDBId: string = toDynamoDBId(userId)
             const input: AWS. DynamoDB.Types.UpdateItemInput = {
                 TableName: App.Table.name,
-                Key: { [App.Table.pkName]: {S: toDynamoDBId(userId)} },
+                Key: {
+                    [App.Table.pkName]: {S: dynamoDBId},
+                    [App.Table.skName]: {S: dynamoDBId}
+                },
+                ConditionExpression: `${App.Table.pkName} = :id`,
                 UpdateExpression: "set longitude = :x, latitude = :y",
                 ExpressionAttributeValues: {
                     ":x": {N: location.longitude.toString()},
-                    ":y": {N: location.latitude.toString()}
+                    ":y": {N: location.latitude.toString()},
+                    ":id": {S: toDynamoDBId(userId)}
                 }
             }
             await ddb.updateItem(input).promise()

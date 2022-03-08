@@ -81,14 +81,14 @@ test("get user", async(done) => {
     event.resource = "/user/{id}"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "b7971a00-47a9-4157-b455-c712095a9bae"
+        id: "b55d9810-1c84-456f-8145-1935f3280e88"
     }
     const response: Endpoint.Response = await handler(event)
     console.log(JSON.stringify(response))
     done()
 })
 
-test("update user location", async(done) => {
+test("update user location of existing user", async(done) => {
     const location: User.Location = {
         "longitude": 666,
         "latitude": 777
@@ -96,7 +96,23 @@ test("update user location", async(done) => {
     event.resource = "/user/{id}"
     event.httpMethod = "PUT"
     event.pathParameters = {
-        id: "b7971a00-47a9-4157-b455-c712095a9bae"
+        id: "b55d9810-1c84-456f-8145-1935f3280e88"
+    }
+    event.body = JSON.stringify(location)
+    const response: Endpoint.Response = await handler(event)
+    console.log(JSON.stringify(response))
+    done()
+})
+
+test("update user location of non existing user", async(done) => {
+    const location: User.Location = {
+        "longitude": 666,
+        "latitude": 777
+    }
+    event.resource = "/user/{id}"
+    event.httpMethod = "PUT"
+    event.pathParameters = {
+        id: "doesnotexist"
     }
     event.body = JSON.stringify(location)
     const response: Endpoint.Response = await handler(event)
@@ -106,9 +122,9 @@ test("update user location", async(done) => {
 
 test("create carpool", async(done) => {
     const carpool: Carpool.Attributes = {
-        "host": "43534",
-        "genre": "pop",
-        "licensePlate": "GY3421"
+        "host": "56322",
+        "genre": "country",
+        "licencePlate": "MY3231"
     }
     event.resource = "/carpool"
     event.httpMethod = "POST"
@@ -122,7 +138,7 @@ test("get carpool", async(done) => {
     event.resource = "/carpool/{id}"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "b455e4cd-10af-437b-9733-ceecd5e486bd"
+        id: "428d1595-f7ed-48be-90cb-5e1fe48602d1"
     }
     const response: Endpoint.Response = await handler(event)
     console.log(JSON.stringify(response))

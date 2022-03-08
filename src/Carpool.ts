@@ -19,20 +19,22 @@ export namespace Carpool {
     export interface Attributes {
         host: string
         genre: string
-        licensePlate: string
+        licencePlate: string
     }
 
     export namespace Create {
 
         async function save(carpool: Carpool): Promise<Carpool> {
             console.log(`Saving carpool=${JSON.stringify(carpool)} into DynamoDB...`)
+            const dynamoDBId: string = toDynamoDBId(carpool.id)
             const input: AWS.DynamoDB.Types.PutItemInput = {
                 TableName: App.Table.name,
                 Item: {
-                    [App.Table.pkName]: {S: toDynamoDBId(carpool.id)},
+                    [App.Table.pkName]: {S: dynamoDBId},
+                    [App.Table.skName]: {S: dynamoDBId},
                     host: {S: carpool.host},
                     genre: {S: carpool.genre},
-                    licensePlate: {S: carpool.licensePlate},
+                    licencePlate: {S: carpool.licencePlate},
                 }
             }
             await ddb.putItem(input).promise()
@@ -75,9 +77,13 @@ export namespace Carpool {
     export namespace Get {
 
         async function retrieve(carpoolId: string): Promise<Carpool> {
+            const dynamoDBId: string = toDynamoDBId(carpoolId)
             const input: AWS.DynamoDB.Types.GetItemInput = {
                 TableName: App.Table.name,
-                Key: {[App.Table.pkName]: {S: toDynamoDBId(carpoolId)}}
+                Key: {
+                    [App.Table.pkName]: {S: dynamoDBId},
+                    [App.Table.skName]: {S: dynamoDBId}
+                }
             }
             const output: AWS.DynamoDB.Types.GetItemOutput = await ddb.getItem(input).promise()
             if (!isDefined(output.Item)) throw new Error("DynamoDB.getItem returned undefined")
@@ -85,7 +91,7 @@ export namespace Carpool {
                 id: carpoolId,
                 host: output.Item["host"]["S"] as string,
                 genre: output.Item["genre"]["S"] as string,
-                licensePlate: output.Item["licensePlate"]["S"] as string,
+                licencePlate: output.Item["licencePlate"]["S"] as string,
             }
             return carpool
         }
@@ -124,27 +130,24 @@ export namespace Carpool {
 
         export namespace Get {
 
-            async function retrieve(carpoolId: string): Promise<User[]> {
+            async function retrieve(carpoolId: string): Promise<Participants> {
                 const input: AWS.DynamoDB.Types.QueryInput = {
                     TableName: App.Table.name,
-                    IndexName: App.Table.gsiName,
-                    KeyConditionExpression: `${App.Table.gsiPkName} = :x`,
-                    ExpressionAttributeValues: { ":x": {S: toDynamoDBId(carpoolId)} },
-                    Select: "SPECIFIC_ATTRIBUTES",
-                    ProjectionExpression: `${App.Table.gsiSkName}, #name, longitude, latitude`,
-                    ExpressionAttributeNames: { "#name": "name"}
+                    KeyConditionExpression: `${App.Table.pkName} = :x and begins_with(${App.Table.skName}, :y)`,
+                    ExpressionAttributeValues: {
+                        ":x": {S: toDynamoDBId(carpoolId)},
+                        ":y": {S: "USER#"}
+                    },
+                    Select: "ALL_ATTRIBUTES",
                 }
                 const output: AWS.DynamoDB.Types.QueryOutput = await ddb.query(input).promise()
                 if (!isDefined(output.Items)) throw new Error("DynamoDB.query returned undefined")
-                const users: User[] = output.Items.map(item => {
-                    return {
-                        id: User.fromDynamoDBId(item[App.Table.gsiSkName]["S"] as string),
-                        name: item["name"]["S"] as string,
-                        longitude: +(item["longitude"]["N"] as string),
-                        latitude: +(item["latitude"]["N"] as string)
-                    }
-                })
-                return users
+                const participants: Participants = {
+                    participants: output.Items.map(item =>
+                        User.fromDynamoDBId(item[App.Table.skName]["S"] as string)
+                    )
+                }
+                return participants
             }
 
             export const endpoint: Endpoint = new Endpoint(
@@ -161,10 +164,10 @@ export namespace Carpool {
                         const id: string = event.pathParameters["id"]
                         //Retrieve carpool participants from DynamoDB
                         try {
-                            const users: User[] = await retrieve(id)
+                            const participants: Participants = await retrieve(id)
                             response = {
                                 statusCode: 200,
-                                body: JSON.stringify(users)
+                                body: JSON.stringify(participants)
                             }
                         } catch (err: any) {
                             response = {
@@ -184,17 +187,11 @@ export namespace Carpool {
                 const input: AWS.DynamoDB.Types.TransactWriteItemsInput = {
                     TransactItems: userIds.map(userId => {
                         return {
-                            Update: {
+                            Put: {
                                 TableName: App.Table.name,
-                                Key: {[App.Table.pkName]: {S: User.toDynamoDBId(userId)}},
-                                UpdateExpression: "set #pk = :x, #sk = :y",
-                                ExpressionAttributeNames: {
-                                    "#pk": App.Table.gsiPkName,
-                                    "#sk": App.Table.gsiSkName,
-                                },
-                                ExpressionAttributeValues: {
-                                    ":x": {S: toDynamoDBId(carpoolId)},
-                                    ":y": {S: User.toDynamoDBId(userId)}
+                                Item: {
+                                    [App.Table.pkName]: {S: toDynamoDBId(carpoolId)},
+                                    [App.Table.skName]: {S: User.toDynamoDBId(userId)}
                                 }
                             }
                         }

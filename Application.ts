@@ -11,28 +11,13 @@ const tags: Application.Resource.Tag[] = [
 export const app = Application.new( `${App.prefixId}-app`, App.account, App.region,"Application.ts")
 
 const table: DynamoDB.Table = DynamoDB.Table.new(App.Table.name, tags,
-    App.Table.pkName, App.Table.pkType)
-const tableInstance: DynamoDB.Table.Instance = app.addResource(table) as DynamoDB.Table.Instance
-const tableConstruct: ddb.Table = tableInstance.asConstruct as ddb.Table
-tableConstruct.addGlobalSecondaryIndex({
-    indexName: App.Table.gsiName,
-    projectionType: ddb.ProjectionType.INCLUDE,
-    nonKeyAttributes: ["name", "longitude", "latitude"],
-    partitionKey: {
-        name: App.Table.gsiPkName,
-        type: App.Table.gsiPkType as ddb.AttributeType
-    },
-    sortKey: {
-        name: App.Table.gsiSkName,
-        type: App.Table.gsiSkType  as ddb.AttributeType
-    }
-})
+    App.Table.pkName, App.Table.pkType, App.Table.skName, App.Table.skType)
+app.addResource(table)
 
 const lambdaPermissions: IAM.Permissions = new IAM.Permissions(
     ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:Query"],
     "Allow",
-    [table],
-    [`${tableInstance.arn}/index/*`]
+    [table]
 )
 const lambda: Lambda.Function = new Lambda.Function(
     `${App.prefixId}-lambda`, "src", tags, "Lambda.handler", undefined, lambdaPermissions)
