@@ -37,15 +37,6 @@ export namespace Carpool {
         typeof App.Table.Attribute.Carpool.Status.Started |
         typeof App.Table.Attribute.Carpool.Status.Closed
 
-    /*TODO
-       1) query carpools by the GSI(host,PK) where host = host, filtering by status != closed,
-       if the query returns results, the carpool cannot be created because the
-       user is already hosting a non-closed carpool.
-       2) query items by the GSI(SK,PK) (i.e. inverted index), filtering by status != closed,
-       if the query returns results, the carpool cannot be created because the host is
-       already participating in a non-closed carpool
-       3) set carpool status to available
-     */
     export namespace Create {
 
         async function save(carpool: Carpool.Attributes): Promise<Carpool> {
@@ -104,16 +95,6 @@ export namespace Carpool {
             })
     }
 
-    /* TODO
-        1) Query by the GSI(SK,PK) with SK = "user joining" and filtering by status != closed, if the query
-        return results, the user cannot join because he is a participant in another non-closed carpool
-        2) Query by GSI(host,PK) with host = "user joining" and filtering by status != closed, if the query
-        return results, the user cannot join because he is a host of a non-closed carpool
-        3) Query by (PK,SK) with PK = "carpool to join", if the query has 4 results or more, the user cannot join
-        because the carpool already has 4 participants
-        4) Save an item (PK, SK) where PK = "carpool to join" and SK = "user to join"
-        5) If 3) returned 3 results update the "carpool to join" with status = "ready"
-     */
     export namespace Join {
 
         export type Input = {
@@ -190,13 +171,6 @@ export namespace Carpool {
             })
     }
 
-    /*
-    TODO
-     1) query by GSI(host,PK) with host = "user calling" and filtering by status = ready, if the query
-     does not return results, the user cannot start the carpool as the user is not hosting any carpool ready to
-     be started
-     2) update the carpool with status = started
-     */
     export namespace Start {
 
         export type Input = {
@@ -253,12 +227,6 @@ export namespace Carpool {
             })
     }
 
-    /* TODO
-        1) query by GSI(PK,host) with host = "user calling" and filtering by status = started, if the query
-        does not return results, the user cannot close the carpool as the user is not hosting any ongoing carpool
-        2) update the carpool with status = closed and winner = winner
-        3) update the participants with status = closed and the winner with isWinner = true
-     */
     export namespace Close {
 
         export type Input = {
@@ -408,7 +376,6 @@ export namespace Carpool {
                 })
         }
 
-        //TODO query by GSI(SK,PK) where user = participant returning the field winner
         export namespace ByParticipant {
 
             export const endpoint: Endpoint = new Endpoint(
@@ -441,7 +408,6 @@ export namespace Carpool {
                 })
         }
 
-        //TODO query the carpools by the GSI(status, PK) where status = available
         export namespace Available {
 
             export async function retrieve(genre?: string): Promise<Carpool[]> {
@@ -504,7 +470,6 @@ export namespace Carpool {
                     return response
                 })
 
-            //TODO query the carpools by the GSI(status,PK) wuth status = available and filtering by genre
             export namespace ByGenre {
 
                 export const endpoint: Endpoint = new Endpoint(
