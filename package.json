@@ -1,7 +1,7 @@
 {
-  "name": "tpm-2301",
+  "name": "tpm-2483",
   "version": "1.0.0",
-  "description": "AWS DynamoDB Badge: Task-1 CRUD Application",
+  "description": "AWS DynamoDB Badge: Task-2 Access Patterns",
   "main": "index.js",
   "repository": {
     "type": "git",
@@ -20,7 +20,7 @@
     "build": "tsc"
   },
   "devDependencies": {
-    "@aws-cdk/aws-apigateway": "^1.140.0",
+    "aws-cdk-lib": "^2.15.0",
     "@pstorm/aws-cdk": "latest",
     "@types/aws-lambda": "^8.10.93",
     "@types/jest": "^24.0.22",

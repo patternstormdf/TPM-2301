@@ -1,19 +1,9 @@
-import {app} from "../Application"
 import {APIGatewayProxyEvent} from "aws-lambda"
 import {handler} from "../src/Lambda"
 import {User} from "../src/User"
 import {Carpool} from "../src/Carpool"
 import {Endpoint} from "../src/Endpoint"
-
-test("deploy application", async(done) => {
-    await app.deploy("p2vtpm")
-    done()
-}, 1000000)
-
-test("undeploy application", async(done) => {
-    await app.undeploy("p2vtpm")
-    done()
-}, 1000000)
+import {v4 as uuidv4} from "uuid"
 
 const event: APIGatewayProxyEvent = {
     httpMethod: "",
@@ -59,114 +49,915 @@ const event: APIGatewayProxyEvent = {
     }
 }
 
-test("create user", async(done) => {
-    const user: User.Attributes = {
-        "name": "John Smith",
-        "longitude": 1234,
-        "latitude": 546
-    }
+async function delay(ms: number): Promise<unknown> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function createUser(user: User): Promise<User> {
     event.resource = "/user"
     event.httpMethod = "POST"
     event.body = JSON.stringify(user)
     const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    const newUser: User.Attributes = JSON.parse(response.body) as User.Attributes
-    expect(newUser.name).toBe(user.name)
-    expect(newUser.longitude).toBe(user.longitude)
-    expect(newUser.latitude).toBe(user.latitude)
-    done()
-})
+    return JSON.parse(response.body)
+}
 
-test("get user", async(done) => {
+async function getUserById(userName: string): Promise<User> {
     event.resource = "/user/{id}"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "b55d9810-1c84-456f-8145-1935f3280e88"
+        id: userName
     }
     const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    done()
-})
+    return JSON.parse(response.body)
+}
 
-test("update user location of existing user", async(done) => {
-    const location: User.Location = {
-        "longitude": 666,
-        "latitude": 777
-    }
+async function updateUserLocation(userId: string, location: User.Location): Promise<User.Location | undefined> {
     event.resource = "/user/{id}"
     event.httpMethod = "PUT"
     event.pathParameters = {
-        id: "b55d9810-1c84-456f-8145-1935f3280e88"
+        id: userId
     }
     event.body = JSON.stringify(location)
     const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    done()
-})
+    return (response.statusCode == 200)? JSON.parse(response.body) : undefined
+}
 
-test("update user location of non existing user", async(done) => {
-    const location: User.Location = {
-        "longitude": 666,
-        "latitude": 777
-    }
-    event.resource = "/user/{id}"
-    event.httpMethod = "PUT"
-    event.pathParameters = {
-        id: "doesnotexist"
-    }
-    event.body = JSON.stringify(location)
-    const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    done()
-})
-
-test("create carpool", async(done) => {
-    const carpool: Carpool.Attributes = {
-        "host": "56322",
-        "genre": "country",
-        "licencePlate": "MY3231"
-    }
+async function createCarpool(carpool: Carpool.Attributes): Promise<Carpool | undefined> {
     event.resource = "/carpool"
     event.httpMethod = "POST"
     event.body = JSON.stringify(carpool)
     const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    done()
-})
+    if (response.statusCode != 200) return undefined
+    return JSON.parse(response.body)
+}
 
-test("get carpool", async(done) => {
+async function joinCarpool(carpoolId: string, userName: string): Promise<Carpool> {
+    event.resource = "/carpool/{id}/join"
+    event.httpMethod = "POST"
+    event.pathParameters = {
+        id: carpoolId
+    }
+    event.body = JSON.stringify({participant: userName})
+    const response: Endpoint.Response = await handler(event)
+    return JSON.parse(response.body)
+}
+
+async function startCarpool(carpoolId: string, userName: string): Promise<void> {
+    event.resource = "/carpool/{id}/start"
+    event.httpMethod = "POST"
+    event.pathParameters = {
+        id: carpoolId
+    }
+    event.body = JSON.stringify({user: userName})
+    const response: Endpoint.Response = await handler(event)
+    return JSON.parse(response.body)
+}
+
+async function closeCarpool(carpoolId: string, userName: string, winner: string): Promise<void> {
+    event.resource = "/carpool/{id}/end"
+    event.httpMethod = "POST"
+    event.pathParameters = {
+        id: carpoolId
+    }
+    event.body = JSON.stringify({user: userName, winner: winner})
+    const response: Endpoint.Response = await handler(event)
+    return JSON.parse(response.body)
+}
+
+async function getCarpoolById(carpoolId: string): Promise<Carpool> {
     event.resource = "/carpool/{id}"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "428d1595-f7ed-48be-90cb-5e1fe48602d1"
+        id: carpoolId
     }
     const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    done()
-})
+    return JSON.parse(response.body)
+}
 
-test("add carpool participants", async(done) => {
-    const participants: Carpool.Participants = {
-        participants: ["4659e5f3-9d01-4a97-9f5d-676ee31dffe5", "b7971a00-47a9-4157-b455-c712095a9bae"]
-    }
-    event.resource = "/carpool/{id}/participants"
-    event.httpMethod = "POST"
-    event.pathParameters = {
-        id: "b455e4cd-10af-437b-9733-ceecd5e486bd"
-    }
-    event.body = JSON.stringify(participants)
-    const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
-    done()
-})
-
-test("get carpool participants", async(done) => {
+async function getCarpoolParticipants(carpoolId: string): Promise<Carpool.Participants> {
     event.resource = "/carpool/{id}/participants"
     event.httpMethod = "GET"
     event.pathParameters = {
-        id: "3bf945c4-e51d-4382-989f-f13ab923786a"
+        id: carpoolId
     }
     const response: Endpoint.Response = await handler(event)
-    console.log(JSON.stringify(response))
+    return JSON.parse(response.body)
+}
+
+namespace Factory {
+    enum Genre {
+        "Pop",
+        "Rock",
+        "Techno",
+        "Punk",
+        "Opera"
+    }
+
+    enum Letter {
+        "P",
+        "K",
+        "L",
+        "Z",
+        "M"
+    }
+
+    function random(min: number, max: number): number {
+        return Math.floor(Math.random() * ((max + 1) - min) + min)
+    }
+    export function newUserName(): string { return uuidv4()}
+    export function newLatitude(): number { return random(1000,9999) }
+    export function newLongitude(): number { return random(1000,9999) }
+    export function newGenre(): string {
+        const n: number = random(0,4)
+        return Genre[n]
+    }
+    export function newLicensePlate(): string {
+        const n: number = random(0,4)
+        const m: number = random(0,4)
+        return `${Letter[n]}${Letter[m]}${random(1000,9999)}`
+    }
+}
+
+test("create user", async(done) => {
+    const expectedUser: User = {
+        "name": Factory.newUserName(),
+        "longitude": Factory.newLongitude(),
+        "latitude": Factory.newLatitude()
+    }
+    const user: User = await createUser(expectedUser)
+    console.log(JSON.stringify(user))
+    expect(user.name).toBe(expectedUser.name)
+    expect(user.longitude).toBe(expectedUser.longitude)
+    expect(user.latitude).toBe(expectedUser.latitude)
+    done()
+})
+
+test("get user", async(done) => {
+    const expectedUser: User = {
+        "name": Factory.newUserName(),
+        "longitude": Factory.newLongitude(),
+        "latitude": Factory.newLatitude()
+    }
+    await createUser(expectedUser)
+    const user: User = await getUserById(expectedUser.name)
+    expect(user.name).toBe(expectedUser.name)
+    expect(user.longitude).toBe(expectedUser.longitude)
+    expect(user.latitude).toBe(expectedUser.latitude)
+    done()
+})
+
+test("update user location of existing user", async(done) => {
+    const expectedUser: User = {
+        "name": Factory.newUserName(),
+        "longitude": Factory.newLongitude(),
+        "latitude": Factory.newLatitude()
+    }
+    await createUser(expectedUser)
+    const expectedLocation: User.Location = {
+        "longitude": 6666,
+        "latitude": 7777
+    }
+    await updateUserLocation(expectedUser.name, expectedLocation)
+    const user: User = await getUserById(expectedUser.name)
+    expect(user.name).toBe(expectedUser.name)
+    expect(user.longitude).toBe(expectedLocation.longitude)
+    expect(user.latitude).toBe(expectedLocation.latitude)
+    done()
+})
+
+test("update user location of non existing user", async(done) => {
+    const newLocation: User.Location = {
+        "longitude": 666,
+        "latitude": 777
+    }
+    const location: User.Location | undefined = await updateUserLocation("doesnotexist", newLocation)
+    expect(location).toBe(undefined)
+    done()
+})
+
+test("create carpool", async(done) => {
+    const carpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const expectedCarpool: Carpool = await createCarpool(carpoolAttrs) as Carpool
+    const carpool: Carpool = await getCarpoolById(expectedCarpool.id)
+    expect(carpool.id).toBe(expectedCarpool.id)
+    expect(carpool.host).toBe(expectedCarpool.host)
+    expect(carpool.genre).toBe(expectedCarpool.genre)
+    expect(carpool.licencePlate).toBe(expectedCarpool.licencePlate)
+    done()
+})
+
+
+test("get carpool by id", async(done) => {
+    const carpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const expectedCarpool: Carpool = await createCarpool(carpoolAttrs) as Carpool
+    const carpool: Carpool = await getCarpoolById(expectedCarpool.id)
+    expect(carpool.id).toBe(expectedCarpool.id)
+    expect(carpool.host).toBe(expectedCarpool.host)
+    expect(carpool.genre).toBe(expectedCarpool.genre)
+    expect(carpool.licencePlate).toBe(expectedCarpool.licencePlate)
+    done()
+})
+
+test("a participant of an available carpool cannot create a carpool", async(done) => {
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userName: string = Factory.newUserName()
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userName)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": userName,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).toBe(undefined)
+    done()
+})
+
+test("when four participants join a carpool it becomes full", async(done) => {
+    const carpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const carpool: Carpool = await createCarpool(carpoolAttrs) as Carpool
+    await joinCarpool(carpool.id, userNames[0])
+    await joinCarpool(carpool.id, userNames[1])
+    await joinCarpool(carpool.id, userNames[2])
+    await joinCarpool(carpool.id, userNames[3])
+    const retrievedCarpool: Carpool = await getCarpoolById(carpool.id) as Carpool
+    const participants: Carpool.Participants = await getCarpoolParticipants(carpool.id)
+    expect(participants.participants.length).toBe(4)
+    expect(retrievedCarpool.status).toBe("full")
+    done()
+}, 20000)
+
+test("a fifth participant cannot join a carpool", async(done) => {
+    const carpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName(), Factory.newUserName()
+    ]
+    const carpool: Carpool = await createCarpool(carpoolAttrs) as Carpool
+    await joinCarpool(carpool.id, userNames[0])
+    await joinCarpool(carpool.id, userNames[1])
+    await joinCarpool(carpool.id, userNames[2])
+    await joinCarpool(carpool.id, userNames[3])
+    await joinCarpool(carpool.id, userNames[4])
+    const participants: Carpool.Participants = await getCarpoolParticipants(carpool.id)
+    expect(participants.participants.length).toBe(4)
+    done()
+}, 20000)
+
+test("a participant of a full carpool cannot create a carpool", async(done) => {
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+        ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": userNames[0],
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).toBe(undefined)
+    done()
+}, 20000)
+
+test("a participant of an started carpool cannot create a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": userNames[2],
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).toBe(undefined)
+    done()
+}, 20000)
+
+test("a participant of a closed carpool can create a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": userNames[2],
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).not.toBe(undefined)
+    done()
+}, 20000)
+
+test("a carpool with less than 4 participants cannot be started", async(done) => {
+    const carpoolHost: string = Factory.newUserName()
+    const carpoolAttrs: Carpool.Attributes = {
+        "host": carpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName()
+    ]
+    const carpool: Carpool = await createCarpool(carpoolAttrs) as Carpool
+    await joinCarpool(carpool.id, userNames[0])
+    await joinCarpool(carpool.id, userNames[1])
+    await joinCarpool(carpool.id, userNames[2])
+    await startCarpool(carpool.id, carpoolHost)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(carpool.id)
+    expect(updatedExistingCarpool.status).toBe("available")
+    done()
+}, 20000)
+
+test("a closed carpool cannot be started", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": userNames[2],
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[3])
+    let updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    updatedExistingCarpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    done()
+}, 20000)
+
+test("a carpool with four participants can be started by the host", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    done()
+}, 20000)
+
+test("a carpool with four participants cannot be started by other user than the host", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, userNames[2])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    done()
+}, 20000)
+
+test("a carpool with less than 4 participants cannot be closed", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[0])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("available")
+    done()
+}, 20000)
+
+test("a full carpool cannot be closed", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    let updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[1])
+    updatedExistingCarpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    done()
+}, 20000)
+
+test("a started carpool can be closed by the host", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    let updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[3])
+    updatedExistingCarpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    done()
+}, 20000)
+
+test("a started carpool cannot be closed by other user than the host", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    let updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    await closeCarpool(existingCarpool.id, userNames[1], userNames[3])
+    updatedExistingCarpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    done()
+}, 20000)
+
+test("a host of an available carpool cannot create a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("available")
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).toBe(undefined)
+    done()
+}, 10000)
+
+test("a host of a full carpool cannot create a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await delay(3000)
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).toBe(undefined)
+    done()
+}, 20000)
+
+test("a host of an started carpool cannot create a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).toBe(undefined)
+    done()
+}, 20000)
+
+test("a host of a closed carpool can create a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs)
+    expect(newCarpool).not.toBe(undefined)
+    done()
+}, 20000)
+
+test("a host of an available carpool cannot join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("available")
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: undefined | Carpool = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, existingCarpoolHost)
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(0)
+    done()
+}, 10000)
+
+test("a host of a full carpool cannot join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, existingCarpoolHost)
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(0)
+    done()
+}, 20000)
+
+test("a host of an started carpool cannot join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, existingCarpoolHost)
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(0)
+    done()
+}, 20000)
+
+test("a host of a closed carpool can join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, existingCarpoolHost)
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(1)
+    done()
+}, 20000)
+
+test("a participant of an available carpool cannot join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const participant: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, participant)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("available")
+    let participants: Carpool.Participants = await getCarpoolParticipants(existingCarpool.id)
+    expect(participants.participants.length).toBe(1)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: undefined | Carpool = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, participant)
+    participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(0)
+    done()
+}, 10000)
+
+test("a participant of a full carpool cannot join a carpool", async(done) => {
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("full")
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, userNames[2])
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(0)
+    done()
+}, 20000)
+
+test("a participant of an started carpool cannot join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("started")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, userNames[0])
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(0)
+    done()
+}, 20000)
+
+test("a participant of a closed carpool can join a carpool", async(done) => {
+    const existingCarpoolHost: string = Factory.newUserName()
+    const existingCarpoolAttrs: Carpool.Attributes = {
+        "host": existingCarpoolHost,
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    const userNames: string[] = [
+        Factory.newUserName(), Factory.newUserName(),
+        Factory.newUserName(), Factory.newUserName()
+    ]
+    const existingCarpool: Carpool = await createCarpool(existingCarpoolAttrs) as Carpool
+    await joinCarpool(existingCarpool.id, userNames[0])
+    await joinCarpool(existingCarpool.id, userNames[1])
+    await joinCarpool(existingCarpool.id, userNames[2])
+    await joinCarpool(existingCarpool.id, userNames[3])
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    const newCarpoolAttrs: Carpool.Attributes = {
+        "host": Factory.newUserName(),
+        "genre": Factory.newGenre(),
+        "licencePlate": Factory.newLicensePlate()
+    }
+    await startCarpool(existingCarpool.id, existingCarpoolHost)
+    await closeCarpool(existingCarpool.id, existingCarpoolHost, userNames[3])
+    const updatedExistingCarpool: Carpool = await getCarpoolById(existingCarpool.id)
+    expect(updatedExistingCarpool.status).toBe("closed")
+    const newCarpool: Carpool | undefined = await createCarpool(newCarpoolAttrs) as Carpool
+    await joinCarpool(newCarpool.id, userNames[2])
+    const participants: Carpool.Participants = await getCarpoolParticipants(newCarpool.id)
+    expect(participants.participants.length).toBe(1)
+    done()
+}, 20000)
+
+test("get carpool participants", async(done) => {
+    //TODO
+    //const response: Endpoint.Response = await getCarpoolParticipants("b55d9810-1c84-456f-8145-1935f3280e88")
+    //console.log(JSON.stringify(response))
     done()
 })
