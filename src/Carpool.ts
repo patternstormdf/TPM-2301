@@ -1,10 +1,10 @@
 import {Endpoint} from "./Endpoint"
 import {APIGatewayProxyEvent} from "aws-lambda"
 import {v4 as uuidv4} from "uuid"
-import {Application as App, isDefined} from "./Utils"
+import {Application as App, delay, isDefined} from "./Utils"
 import * as AWS from "aws-sdk"
 import {User} from "./User"
-import {ExpressionAttributeValueMap, TransactWriteItem} from "aws-sdk/clients/dynamodb"
+import {ExpressionAttributeValueMap, ExpressionAttributeNameMap, TransactWriteItem} from "aws-sdk/clients/dynamodb"
 
 export interface Carpool extends Carpool.Attributes {
     id: string
@@ -42,22 +42,41 @@ export namespace Carpool {
         async function save(carpool: Carpool.Attributes): Promise<Carpool> {
             console.log(`Saving carpool=${JSON.stringify(carpool)} into DynamoDB...`)
             const id: string = uuidv4()
-            const dynamoDBId: string = Carpool.toDynamoDBId(id)
-            const input: AWS.DynamoDB.Types.PutItemInput = {
-                TableName: App.Table.name,
-                Item: {
-                    [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: dynamoDBId},
-                    [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: dynamoDBId},
-                    [App.Table.Attribute.Carpool.Host.name]: {[App.Table.Attribute.Carpool.Host.type]: carpool.host},
-                    [App.Table.Attribute.Carpool.Genre.name]:
-                        {[App.Table.Attribute.Carpool.Genre.type]: carpool.genre},
-                    [App.Table.Attribute.Carpool.LicencePlate.name]:
-                        {[App.Table.Attribute.Carpool.LicencePlate.type]: carpool.licencePlate},
-                    [App.Table.Attribute.Carpool.Status.name]:
-                        {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Available}
-                }
+            const carpoolDynamoDBId: string = Carpool.toDynamoDBId(id)
+            const hostDynamoDBId: string = User.toDynamoDBId(carpool.host)
+            const input: AWS.DynamoDB.Types.TransactWriteItemsInput = {
+                TransactItems: [
+                    {
+                        Put: {
+                            TableName: App.Table.name,
+                            Item: {
+                                [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: carpoolDynamoDBId},
+                                [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId},
+                                [App.Table.Attribute.Carpool.Host.name]: {[App.Table.Attribute.Carpool.Host.type]: carpool.host},
+                                [App.Table.Attribute.Carpool.Genre.name]:
+                                    {[App.Table.Attribute.Carpool.Genre.type]: carpool.genre},
+                                [App.Table.Attribute.Carpool.LicencePlate.name]:
+                                    {[App.Table.Attribute.Carpool.LicencePlate.type]: carpool.licencePlate},
+                                [App.Table.Attribute.Carpool.Participants.name]:
+                                    {[App.Table.Attribute.Carpool.Participants.type]: "0"},
+                                [App.Table.Attribute.Carpool.Status.name]:
+                                    {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Available}
+                            }
+                        }
+                    },
+                    {
+                        Put: {
+                            TableName: App.Table.name,
+                            Item: {
+                                [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: hostDynamoDBId},
+                                [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId},
+                                [App.Table.Attribute.User.IsHost.name]: {[App.Table.Attribute.User.IsHost.type]: true}
+                            }
+                        }
+                    }
+                ]
             }
-            await ddb.putItem(input).promise()
+            await ddb.transactWriteItems(input).promise()
             console.log(`Carpool saved into DynamoDB!`)
             return {
                 ...carpool, ...{id: id, status: App.Table.Attribute.Carpool.Status.Available}
@@ -68,30 +87,30 @@ export namespace Carpool {
             "/carpool",
             "POST",
             async (event: APIGatewayProxyEvent) => {
-                let response: Endpoint.Response
                 try {
                     if (!isDefined(event.body)) throw new Error("body not defined")
-
                     const carpoolAttrs: Carpool.Attributes = JSON.parse(event.body)
-                    //Validate that the user is not hosting a non-closed carpool
-                    if (await User.isHostingNonClosedCarpool(carpoolAttrs.host))
-                        throw new Error(`User ${carpoolAttrs.host} is already hosting a Carpool`)
-                    //Validate that the user is not participating in a non-closed carpool
-                    if (await User.isParticipantNonClosedCarpool(carpoolAttrs.host))
-                        throw new Error(`User ${carpoolAttrs.host} is participating in a Carpool`)
-                    //Save the carpool to datastore
-                    const carpool: Carpool = await save(carpoolAttrs)
-                    response = {
-                        statusCode: 200,
-                        body: JSON.stringify(carpool)
-                    }
+
+                    return await App.Table.Lock.dispatch(async () => {
+                        //Validate that the user is not hosting a non-closed carpool
+                        if (await User.isHostingNonClosedCarpool(carpoolAttrs.host, true))
+                            throw new Error(`User ${carpoolAttrs.host} is already hosting a Carpool`)
+                        //Validate that the user is not participating in a non-closed carpool
+                        if (await User.isParticipantNonClosedCarpool(carpoolAttrs.host, true))
+                            throw new Error(`User ${carpoolAttrs.host} is participating in a Carpool`)
+                        //Save the carpool to datastore
+                        const carpool: Carpool = await save(carpoolAttrs)
+                        return {
+                            statusCode: 200,
+                            body: JSON.stringify(carpool)
+                        }
+                    })
                 } catch (err: any) {
-                    response = {
+                    return {
                         statusCode: 400,
                         body: JSON.stringify({error: err.message})
                     }
                 }
-                return response
             })
     }
 
@@ -106,30 +125,41 @@ export namespace Carpool {
                 Put: {
                     TableName: App.Table.name,
                     Item: {
-                        [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: Carpool.toDynamoDBId(carpoolId)},
-                        [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: User.toDynamoDBId(userName)}
+                        [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: User.toDynamoDBId(userName)},
+                        [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: Carpool.toDynamoDBId(carpoolId)}
                     }
                 }
             }]
-            if (participantCount == 3) {
-                const carpoolDynamoDBId: string = Carpool.toDynamoDBId(carpoolId)
-                transactItems = transactItems.concat({
-                    Update: {
-                        TableName: App.Table.name,
-                        Key: {
-                            [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: carpoolDynamoDBId},
-                            [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId}
-                        },
-                        UpdateExpression: "set #s = :x",
-                        ExpressionAttributeNames: {
-                            "#s": App.Table.Attribute.Carpool.Status.name
-                        },
-                        ExpressionAttributeValues: {
-                            ":x": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Full},
-                        }
-                    }
-                })
+            let updateExpression: string = `set #p = :y`
+            let expressionAttributeNames: ExpressionAttributeNameMap = {
+                "#p": App.Table.Attribute.Carpool.Participants.name
             }
+            let expressionAttributeValues: ExpressionAttributeValueMap = {
+                ":y": {[App.Table.Attribute.Carpool.Participants.type]: (participantCount + 1).toString()},
+            }
+            if (participantCount == 3) {
+                updateExpression = `${updateExpression}, #s = :x`
+                expressionAttributeNames = {...expressionAttributeNames, ...{
+                        "#s": App.Table.Attribute.Carpool.Status.name
+                    }}
+                expressionAttributeValues = {...expressionAttributeValues, ...{
+                        ":x": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Full}
+                    }}
+            }
+            const carpoolDynamoDBId: string = Carpool.toDynamoDBId(carpoolId)
+            const transactItem: TransactWriteItem = {
+                Update: {
+                    TableName: App.Table.name,
+                    Key: {
+                        [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: carpoolDynamoDBId},
+                        [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId}
+                    },
+                    UpdateExpression: updateExpression,
+                    ExpressionAttributeNames: expressionAttributeNames,
+                    ExpressionAttributeValues: expressionAttributeValues
+                }
+            }
+            transactItems = transactItems.concat(transactItem)
             const input: AWS.DynamoDB.Types.TransactWriteItemsInput = {TransactItems: transactItems}
             await ddb.transactWriteItems(input).promise()
         }
@@ -138,7 +168,6 @@ export namespace Carpool {
             "/carpool/{id}/join",
             "POST",
             async (event: APIGatewayProxyEvent) => {
-                let response: Endpoint.Response
                 try {
                     if (!isDefined(event.body)) throw new Error("body not defined")
                     if (!isDefined(event.pathParameters) || !isDefined(event.pathParameters["id"]))
@@ -146,28 +175,29 @@ export namespace Carpool {
                     const carpoolId: string = event.pathParameters["id"]
                     const body: Input = JSON.parse(event.body)
                     const participant: string = body.participant
-                    //Validate that the user joining is not hosting a non-closed carpool
-                    if (await User.isHostingNonClosedCarpool(participant))
-                        throw new Error(`User ${participant} is already hosting a Carpool`)
-                    //Validate that the user joining is not participating in a non-closed carpool
-                    if (await User.isParticipantNonClosedCarpool(participant))
-                        throw new Error(`User ${participant} is participating in a Carpool`)
-                    //Validate that the carpool has less than four participants
-                    const participantCount: number = await Carpool.Participants.count(carpoolId)
-                    if (participantCount >= 4) throw new Error(`The Carpool ${carpoolId} is full`)
-                    //Update the user as carpool participant in the datastore
-                    await update(participant, carpoolId, participantCount)
-                    response = {
-                        statusCode: 200,
-                        body: JSON.stringify({})
-                    }
+                    return await App.Table.Lock.dispatch(async () => {
+                        //Validate that the user joining is not hosting a non-closed carpool
+                        if (await User.isHostingNonClosedCarpool(participant, true))
+                            throw new Error(`User ${participant} is already hosting a Carpool`)
+                        //Validate that the user joining is not participating in a non-closed carpool
+                        if (await User.isParticipantNonClosedCarpool(participant, true))
+                            throw new Error(`User ${participant} is participating in a Carpool`)
+                        //Validate that the carpool has less than four participants
+                        const participantCount: number = await Carpool.Participants.count(carpoolId, true)
+                        if (participantCount >= 4) throw new Error(`The Carpool ${carpoolId} is full`)
+                        //Update the user as carpool participant in the datastore
+                        await update(participant, carpoolId, participantCount)
+                        return {
+                            statusCode: 200,
+                            body: JSON.stringify({})
+                        }
+                    })
                 } catch (err: any) {
-                    response = {
+                    return {
                         statusCode: 400,
                         body: JSON.stringify({error: err.message})
                     }
                 }
-                return response
             })
     }
 
@@ -177,20 +207,24 @@ export namespace Carpool {
             user: string
         }
 
-        async function update(carpoolId: string): Promise<void> {
-            const dynamoDBId: string = Carpool.toDynamoDBId(carpoolId)
+        async function update(carpoolId: string, host: string): Promise<void> {
+            const carpoolDynamoDBId: string = Carpool.toDynamoDBId(carpoolId)
             const input: AWS.DynamoDB.Types.UpdateItemInput = {
                 TableName: App.Table.name,
                 Key: {
-                    [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: dynamoDBId},
-                    [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: dynamoDBId}
+                    [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: carpoolDynamoDBId},
+                    [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId}
                 },
+                //Validate that the user is hosting the carpool and the carpool is full
+                ConditionExpression: `#s = :y and ${App.Table.Attribute.Carpool.Host.name} = :h`,
                 UpdateExpression: "set #s = :x",
                 ExpressionAttributeNames: {
                     "#s": App.Table.Attribute.Carpool.Status.name
                 },
                 ExpressionAttributeValues: {
                     ":x": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Started},
+                    ":y": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Full},
+                    ":h": {[App.Table.Attribute.Carpool.Host.type]: host}
                 }
             }
             await ddb.updateItem(input).promise()
@@ -200,7 +234,6 @@ export namespace Carpool {
             "/carpool/{id}/start",
             "POST",
             async (event: APIGatewayProxyEvent) => {
-                let response: Endpoint.Response
                 try {
                     if (!isDefined(event.body)) throw new Error("body not defined")
                     if (!isDefined(event.pathParameters) || !isDefined(event.pathParameters["id"]))
@@ -208,22 +241,20 @@ export namespace Carpool {
                     const carpoolId: string = event.pathParameters["id"]
                     const body: Input = JSON.parse(event.body)
                     const userName: string = body.user
-                    //Validate that the user is hosting the carpool and the carpool is full
-                    if (!(await User.isHostingFullCarpool(userName, carpoolId)))
-                        throw new Error(`User ${userName} is not hosting the Carpool ${carpoolId} or the Carpool is not full`)
-                    //Update the carpool as started in the datastore
-                    await update(carpoolId)
-                    response = {
-                        statusCode: 200,
-                        body: JSON.stringify({})
-                    }
+                    return await App.Table.Lock.dispatch(async () => {
+                        //Update the carpool as started in the datastore
+                        await update(carpoolId, userName)
+                        return {
+                            statusCode: 200,
+                            body: JSON.stringify({})
+                        }
+                    })
                 } catch (err: any) {
-                    response = {
+                    return {
                         statusCode: 400,
                         body: JSON.stringify({error: err.message})
                     }
                 }
-                return response
             })
     }
 
@@ -234,7 +265,7 @@ export namespace Carpool {
             winner: string
         }
 
-        async function update(carpoolId: string, winner: string, participants: string[]): Promise<void> {
+        async function update(carpoolId: string, host: string, winner: string, users: Carpool.Users): Promise<void> {
             const carpoolDynamoDBId: string = Carpool.toDynamoDBId(carpoolId)
             let transactItems: TransactWriteItem[] = [{
                 Update: {
@@ -243,6 +274,8 @@ export namespace Carpool {
                         [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: carpoolDynamoDBId},
                         [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId}
                     },
+                    //Validate that the user is hosting the carpool and the carpool has started
+                    ConditionExpression: `#s = :z and ${App.Table.Attribute.Carpool.Host.name} = :h`,
                     UpdateExpression: `set #s = :x, ${App.Table.Attribute.Carpool.Winner.name} = :y`,
                     ExpressionAttributeNames: {
                         "#s": App.Table.Attribute.Carpool.Status.name
@@ -250,10 +283,12 @@ export namespace Carpool {
                     ExpressionAttributeValues: {
                         ":x": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Closed},
                         ":y": {[App.Table.Attribute.Carpool.Winner.type]: winner},
+                        ":z": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Started},
+                        ":h": {[App.Table.Attribute.Carpool.Host.type]: host},
                     }
                 }
             }]
-            transactItems = transactItems.concat(participants.map(participant => {
+            transactItems = transactItems.concat(users.participants.map(participant => {
                 const updateExpression: string = (participant == winner) ?
                     `set ${App.Table.Attribute.User.IsWinner.name} = :x, #s = :y` : "set #s = :y"
                 const expressionAttributeValues: ExpressionAttributeValueMap = (participant == winner) ? {
@@ -264,8 +299,8 @@ export namespace Carpool {
                     Update: {
                         TableName: App.Table.name,
                         Key: {
-                            [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: carpoolDynamoDBId},
-                            [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: User.toDynamoDBId(participant)}
+                            [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: User.toDynamoDBId(participant)},
+                            [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId},
                         },
                         UpdateExpression: updateExpression,
                         ExpressionAttributeValues: expressionAttributeValues,
@@ -273,17 +308,51 @@ export namespace Carpool {
                     }
                 }
             }))
+            transactItems = transactItems.concat({
+                Update: {
+                    TableName: App.Table.name,
+                    Key: {
+                        [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: User.toDynamoDBId(users.host)},
+                        [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: carpoolDynamoDBId}
+                    },
+                    UpdateExpression: "set #s = :x",
+                    ExpressionAttributeValues: {
+                        ":x": {[App.Table.Attribute.Carpool.Status.type]: App.Table.Attribute.Carpool.Status.Closed}
+                    },
+                    ExpressionAttributeNames: {
+                        "#s": App.Table.Attribute.Carpool.Status.name
+                    }
+                }
+            })
             const input: AWS.DynamoDB.Types.TransactWriteItemsInput = {
                 TransactItems: transactItems
             }
             await ddb.transactWriteItems(input).promise()
         }
 
+        //This function ensures a consistent read in the Carpool-User GSI for started Carpools
+        async function retrieveUsers(carpoolId: string, retries: number = 0): Promise<Carpool.Users> {
+            if (retries == 20) throw new Error(`Timeout waiting for the GSI Carpool-User to become consistent`)
+            try {
+                const users: Carpool.Users = await Carpool.Users.retrieve(carpoolId)
+                if (users.participants.length != 4) {
+                    await delay(500)
+                    return await retrieveUsers(carpoolId, retries + 1)
+                }
+                return users
+            } catch (err: any) {
+                if (err.message.includes("has no host")) {
+                    await delay(500)
+                    return await retrieveUsers(carpoolId, retries + 1)
+                }
+                throw err
+            }
+        }
+
         export const endpoint: Endpoint = new Endpoint(
             "/carpool/{id}/end",
             "POST",
             async (event: APIGatewayProxyEvent) => {
-                let response: Endpoint.Response
                 try {
                     if (!isDefined(event.body)) throw new Error("body not defined")
                     if (!isDefined(event.pathParameters) || !isDefined(event.pathParameters["id"]))
@@ -291,24 +360,22 @@ export namespace Carpool {
                     const carpoolId: string = event.pathParameters["id"]
                     const body: Input = JSON.parse(event.body)
                     const userName: string = body.user
-                    //Validate that the user is hosting the carpool and the carpool has started
-                    if (!(await User.isHostingStartedCarpool(userName, carpoolId)))
-                        throw new Error(`User ${userName} is not hosting the Carpool ${carpoolId} or the Carpool has not started`)
-                    //Get the Carpool participants to update their status
-                    const participants: Participants = await Carpool.Participants.Get.retrieve(carpoolId)
-                    //Update the carpool as closed with the winner in the datastore
-                    await update(carpoolId, body.winner, participants.participants)
-                    response = {
-                        statusCode: 200,
-                        body: JSON.stringify({})
-                    }
+                    return await App.Table.Lock.dispatch(async () => {
+                        //Get the Carpool's participants and host to update their status
+                        const users: Carpool.Users = await retrieveUsers(carpoolId) //Carpool.Users.retrieve(carpoolId)
+                        //Update the carpool as closed with the winner in the datastore
+                        await update(carpoolId, userName, body.winner, users)
+                        return {
+                            statusCode: 200,
+                            body: JSON.stringify({})
+                        }
+                    })
                 } catch (err: any) {
-                    response = {
+                    return {
                         statusCode: 400,
                         body: JSON.stringify({error: err.message})
                     }
                 }
-                return response
             })
 
     }
@@ -392,7 +459,7 @@ export namespace Carpool {
                         const userName: string = event.pathParameters["id"]
                         //Retrieve carpools participated by the user from the datastore
                         try {
-                            const carpools: User.Carpool[] = await User.getCarpoolsParticipatedBy(userName)
+                            const carpools: User.Carpool[] = await User.getCarpoolsParticipatedBy(userName, false)
                             response = {
                                 statusCode: 200,
                                 body: JSON.stringify(carpools)
@@ -505,34 +572,73 @@ export namespace Carpool {
         }
     }
 
+    export namespace Users {
+
+        export async function retrieve(carpoolId: string): Promise<Users> {
+            const input: AWS.DynamoDB.Types.QueryInput = {
+                TableName: App.Table.name,
+                IndexName: App.Table.GSI.CarpoolUser.name,
+                KeyConditionExpression: `${App.Table.GSI.CarpoolUser.Key.Primary.name} = :x and begins_with(${App.Table.GSI.CarpoolUser.Key.Sort.name}, :y)`,
+                ExpressionAttributeValues: {
+                    ":x": {[App.Table.GSI.CarpoolUser.Key.Primary.type]: Carpool.toDynamoDBId(carpoolId)},
+                    ":y": {[App.Table.GSI.CarpoolUser.Key.Sort.type]: User.prefixId}
+                },
+                Select: "ALL_PROJECTED_ATTRIBUTES"
+            }
+            const output: AWS.DynamoDB.Types.QueryOutput = await ddb.query(input).promise()
+            if (!isDefined(output.Items)) throw new Error("DynamoDB.query returned undefined")
+            let participants: string[] = []
+            let host: string | undefined
+            output.Items.map(item => {
+                if (isDefined(item[App.Table.Attribute.User.IsHost.name]))
+                    host = User.fromDynamoDBId(
+                        item[App.Table.GSI.CarpoolUser.Key.Sort.name][App.Table.GSI.CarpoolUser.Key.Sort.type] as string
+                    )
+                else participants = participants.concat(
+                    User.fromDynamoDBId(
+                        item[App.Table.GSI.CarpoolUser.Key.Sort.name][App.Table.GSI.CarpoolUser.Key.Sort.type] as string
+                    )
+                )
+            })
+            if (!isDefined(host)) throw Error(`The Carpool ${carpoolId} has no host`)
+            return {
+                participants: participants,
+                host: host
+            }
+        }
+    }
+
+    export interface Users extends Participants {
+        host: string
+    }
+
     export namespace Participants {
 
-        export async function count(carpoolId: string): Promise<number> {
-            const participants: Participants = await Participants.Get.retrieve(carpoolId, true)
-            return participants.participants.length
+        export async function count(carpoolId: string, consistent: boolean): Promise<number> {
+            const dynamoDBId: string = Carpool.toDynamoDBId(carpoolId)
+            const input: AWS.DynamoDB.Types.GetItemInput = {
+                TableName: App.Table.name,
+                Key: {
+                    [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: dynamoDBId},
+                    [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: dynamoDBId}
+                },
+                ConsistentRead: consistent
+            }
+            const output: AWS.DynamoDB.Types.GetItemOutput = await ddb.getItem(input).promise()
+            if (!isDefined(output.Item)) throw new Error("DynamoDB.getItem returned undefined")
+            const participantCount: number | undefined =
+                +(output.Item[App.Table.Attribute.Carpool.Participants.name][App.Table.Attribute.Carpool.Participants.type] as string)
+            if (!isDefined(participantCount)) throw new Error(`Carpool ${carpoolId} has not the participant count stored`)
+            return participantCount
         }
 
         export namespace Get {
 
-            export async function retrieve(carpoolId: string, consistentRead: boolean = false): Promise<Participants> {
-                const input: AWS.DynamoDB.Types.QueryInput = {
-                    TableName: App.Table.name,
-                    KeyConditionExpression: `${App.Table.Key.Primary.name} = :x and begins_with(${App.Table.Key.Sort.name}, :y)`,
-                    ExpressionAttributeValues: {
-                        ":x": {[App.Table.Key.Primary.type]: Carpool.toDynamoDBId(carpoolId)},
-                        ":y": {[App.Table.Key.Sort.type]: User.prefixId}
-                    },
-                    Select: "ALL_ATTRIBUTES",
-                    ConsistentRead: consistentRead
+            export async function retrieve(carpoolId: string): Promise<Participants> {
+                const users: Users = await Users.retrieve(carpoolId)
+                return {
+                    participants: users.participants
                 }
-                const output: AWS.DynamoDB.Types.QueryOutput = await ddb.query(input).promise()
-                if (!isDefined(output.Items)) throw new Error("DynamoDB.query returned undefined")
-                const participants: Participants = {
-                    participants: output.Items.map(item =>
-                        User.fromDynamoDBId(item[App.Table.Key.Sort.name][App.Table.Key.Sort.type] as string)
-                    )
-                }
-                return participants
             }
 
             export const endpoint: Endpoint = new Endpoint(

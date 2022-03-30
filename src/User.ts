@@ -4,7 +4,6 @@ import {isDefined} from "./Utils"
 import {Application as App} from "./Utils"
 import * as AWS from "aws-sdk"
 import {Carpool} from "./Carpool"
-import {DynamoDB} from "@pstorm/aws-cdk";
 
 export namespace User {
     const ddb: AWS.DynamoDB = new AWS.DynamoDB({region: App.region})
@@ -29,97 +28,103 @@ export namespace User {
     export type Carpool = {
         id: string
         isWinner?: boolean
+        isHost?: boolean
     }
 
-    async function getCarpoolsRelatedTo(userName: string, role: Role, status?: Carpool.Status, operator?: string): Promise<User.Carpool[]> {
-        const indexName: string = (role == "Participant")? App.Table.GSI.ParticipantCarpool.name : App.Table.GSI.HostCarpool.name
-        const userId: string = (role == "Participant")? User.toDynamoDBId(userName) : userName
-        const pkName: string = (role == "Participant")?
-            App.Table.GSI.ParticipantCarpool.Key.Primary.name : App.Table.GSI.HostCarpool.Key.Primary.name
-        const pkType: DynamoDB.Table.Attribute.Type = (role == "Participant")?
-                App.Table.GSI.ParticipantCarpool.Key.Primary.type : App.Table.GSI.HostCarpool.Key.Primary.type
-        const skName: string = (role == "Participant")?
-            App.Table.GSI.ParticipantCarpool.Key.Sort.name : App.Table.GSI.HostCarpool.Key.Sort.name
-        const skType: DynamoDB.Table.Attribute.Type = (role == "Participant")?
-            App.Table.GSI.ParticipantCarpool.Key.Sort.type : App.Table.GSI.HostCarpool.Key.Sort.type
+    async function getCarpoolsRelatedTo(
+        userName: string, role: Role, consistent: boolean, status?: Carpool.Status, operator?: string
+    ): Promise<User.Carpool[]> {
+        const userId: string = User.toDynamoDBId(userName)
         let input: AWS.DynamoDB.Types.QueryInput = {
             TableName: App.Table.name,
-            IndexName: indexName,
-            KeyConditionExpression: `${pkName} = :x`,
+            KeyConditionExpression: `${App.Table.Key.Primary.name} = :x`,
             ExpressionAttributeValues: {
-                ":x": {[pkType]: userId}
+                ":x": {[App.Table.Key.Primary.type]: userId}
             },
-            Select: "ALL_PROJECTED_ATTRIBUTES"
+            Select: "ALL_ATTRIBUTES",
+            ConsistentRead: consistent
         }
-        if (isDefined(status) && isDefined(operator))
-            input = {...input, ...{
-                    FilterExpression: `#s ${operator} :y`,
-                    ExpressionAttributeNames: {
-                        "#s": App.Table.Attribute.Carpool.Status.name
-                    },
-                    ExpressionAttributeValues: {
-                        ...input.ExpressionAttributeValues,
-                        ...{":y": {[App.Table.Attribute.Carpool.Status.type]: status}}
-                    }
-                }}
+        let filterExpression: string = ""
+        let expressionAttributeNames: AWS.DynamoDB.Types.ExpressionAttributeNameMap | undefined
+        let expressionAttributeValues: AWS.DynamoDB.Types.ExpressionAttributeValueMap | undefined =
+            input.ExpressionAttributeValues
+        if (isDefined(status) && isDefined(operator)) {
+            filterExpression = `#s ${operator} :y`
+            expressionAttributeNames = {
+                "#s": App.Table.Attribute.Carpool.Status.name
+            }
+            expressionAttributeValues = {
+                ...expressionAttributeValues,
+                ...{":y": {[App.Table.Attribute.Carpool.Status.type]: status}}
+            }
+        }
+        if (role == "Host") {
+            filterExpression = (filterExpression != "")
+                ? `${filterExpression} and ${App.Table.Attribute.User.IsHost.name} = :z`
+                : `${App.Table.Attribute.User.IsHost.name} = :z`
+            expressionAttributeValues = {
+                ...expressionAttributeValues,
+                ...{":z": {[App.Table.Attribute.User.IsHost.type]: true}}
+            }
+        }
+        if ((isDefined(status) && isDefined(operator)) || role == "Host") {
+            input = {
+                ...input, ...{
+                    FilterExpression: filterExpression,
+                    ExpressionAttributeNames: expressionAttributeNames,
+                    ExpressionAttributeValues: expressionAttributeValues
+                }
+            }
+        }
         const output: AWS.DynamoDB.Types.QueryOutput = await ddb.query(input).promise()
         if (!isDefined(output.Items)) throw new Error("DynamoDB.query returned undefined")
         const carpools: User.Carpool[] = output.Items.map(item => {
-            const isWinner: boolean | undefined = isDefined(item[App.Table.Attribute.User.IsWinner.name])?
-                (item[App.Table.Attribute.User.IsWinner.name][App.Table.Attribute.User.IsWinner.type] as boolean)
-                : undefined
-            let carpool: User.Carpool = {
-                id: Carpool.fromDynamoDBId(item[skName][skType] as string)
-            }
-            if (isDefined(isWinner)) carpool = {...carpool, ...{winner: isWinner}}
-            return carpool
+                const isWinner: boolean | undefined = isDefined(item[App.Table.Attribute.User.IsWinner.name]) ?
+                    (item[App.Table.Attribute.User.IsWinner.name][App.Table.Attribute.User.IsWinner.type] as boolean)
+                    : undefined
+                const isHost: boolean | undefined = isDefined(item[App.Table.Attribute.User.IsHost.name]) ?
+                    (item[App.Table.Attribute.User.IsHost.name][App.Table.Attribute.User.IsHost.type] as boolean)
+                    : undefined
+                let carpool: User.Carpool = {
+                    id: Carpool.fromDynamoDBId(item[App.Table.Key.Sort.name][App.Table.Key.Sort.type] as string)
+                }
+                if (isDefined(isWinner)) carpool = {...carpool, ...{winner: isWinner}}
+                if (isDefined(isWinner)) carpool = {...carpool, ...{host: isHost}}
+                return carpool
             }
         )
         return carpools
     }
 
-    async function getCarpoolsHostedBy(userName: string, status: Carpool.Status, operator: string): Promise<User.Carpool[]> {
-        return await getCarpoolsRelatedTo(userName, "Host", status, operator)
+    async function getCarpoolsHostedBy(
+        userName: string, status: Carpool.Status, operator: string, consistent: boolean
+    ): Promise<User.Carpool[]> {
+        return await getCarpoolsRelatedTo(userName, "Host", consistent, status, operator)
     }
 
-    export async function getNonClosedCarpoolsHostedBy(userName: string): Promise<User.Carpool[]> {
-        return await getCarpoolsHostedBy(userName, App.Table.Attribute.Carpool.Status.Closed, "<>")
+    export async function getNonClosedCarpoolsHostedBy(userName: string, consistent: boolean): Promise<User.Carpool[]> {
+        return await getCarpoolsHostedBy(userName, App.Table.Attribute.Carpool.Status.Closed, "<>", consistent)
     }
 
-    export async function getFullCarpoolsHostedBy(userName: string): Promise<User.Carpool[]> {
-        return await getCarpoolsHostedBy(userName, App.Table.Attribute.Carpool.Status.Full, "=")
+    export async function getCarpoolsParticipatedBy(
+        userName: string, consistent: boolean, status?: Carpool.Status, operator?: string
+    ): Promise<User.Carpool[]> {
+        return await getCarpoolsRelatedTo(userName, "Participant", consistent, status, operator)
     }
 
-    export async function getCarpoolsParticipatedBy(userName: string, status?: Carpool.Status, operator?: string): Promise<User.Carpool[]> {
-        return await getCarpoolsRelatedTo(userName, "Participant", status, operator)
+    export async function getNonClosedCarpoolsParticipatedBy(userName: string, consistent: boolean): Promise<User.Carpool[]> {
+        return await
+            getCarpoolsParticipatedBy(userName, consistent, App.Table.Attribute.Carpool.Status.Closed, "<>")
     }
 
-    export async function getNonClosedCarpoolsParticipatedBy(userName: string): Promise<User.Carpool[]> {
-        return await getCarpoolsParticipatedBy(userName, App.Table.Attribute.Carpool.Status.Closed, "<>")
-    }
-
-    export async function isHostingNonClosedCarpool(userName: string): Promise<boolean> {
-        const carpools: User.Carpool[] = await User.getNonClosedCarpoolsHostedBy(userName)
+    export async function isHostingNonClosedCarpool(userName: string, consistent: boolean): Promise<boolean> {
+        const carpools: User.Carpool[] = await User.getNonClosedCarpoolsHostedBy(userName, consistent)
         return carpools.length != 0
     }
 
-    export async function isParticipantNonClosedCarpool(userName: string): Promise<boolean> {
-        const carpools: User.Carpool[] = await User.getNonClosedCarpoolsParticipatedBy(userName)
+    export async function isParticipantNonClosedCarpool(userName: string, consistent: boolean): Promise<boolean> {
+        const carpools: User.Carpool[] = await User.getNonClosedCarpoolsParticipatedBy(userName, consistent)
         return carpools.length != 0
-    }
-
-    export async function isHostingFullCarpool(userName: string, carpoolId: string): Promise<boolean> {
-        const carpools: User.Carpool[] = await User.getFullCarpoolsHostedBy(userName)
-        return (carpools.length == 1) && (carpools[0].id == carpoolId)
-    }
-
-    export async function getStartedCarpoolsHostedBy(userName: string): Promise<User.Carpool[]> {
-        return await getCarpoolsHostedBy(userName, App.Table.Attribute.Carpool.Status.Started, "=")
-    }
-
-    export async function isHostingStartedCarpool(userName: string, carpoolId: string): Promise<boolean> {
-        const carpools: User.Carpool[] = await User.getStartedCarpoolsHostedBy(userName)
-        return (carpools.length == 1) && (carpools[0].id == carpoolId)
     }
 
     export namespace Create {
@@ -146,7 +151,7 @@ export namespace User {
         export const endpoint: Endpoint = new Endpoint(
             "/user",
             "POST",
-            async (event: APIGatewayProxyEvent ) => {
+            async (event: APIGatewayProxyEvent) => {
                 let response: Endpoint.Response
                 if (!isDefined(event.body)) {
                     response = {
@@ -180,8 +185,8 @@ export namespace User {
             const input: AWS.DynamoDB.Types.GetItemInput = {
                 TableName: App.Table.name,
                 Key: {
-                    [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: dynamoDBId },
-                    [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: dynamoDBId }
+                    [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: dynamoDBId},
+                    [App.Table.Key.Sort.name]: {[App.Table.Key.Sort.type]: dynamoDBId}
                 }
             }
             const output: AWS.DynamoDB.Types.GetItemOutput = await ddb.getItem(input).promise()
@@ -199,7 +204,7 @@ export namespace User {
         export const endpoint: Endpoint = new Endpoint(
             "/user/{id}",
             "GET",
-            async (event: APIGatewayProxyEvent ) => {
+            async (event: APIGatewayProxyEvent) => {
                 let response: Endpoint.Response
                 if (!isDefined(event.pathParameters) || !isDefined(event.pathParameters["id"])) {
                     response = {
@@ -231,7 +236,7 @@ export namespace User {
         async function update(userId: string, location: User.Location): Promise<User.Location> {
             console.log(`Updating user=${JSON.stringify(userId)}'s location to ${JSON.stringify(location)} into DynamoDB...`)
             const dynamoDBId: string = User.toDynamoDBId(userId)
-            const input: AWS. DynamoDB.Types.UpdateItemInput = {
+            const input: AWS.DynamoDB.Types.UpdateItemInput = {
                 TableName: App.Table.name,
                 Key: {
                     [App.Table.Key.Primary.name]: {[App.Table.Key.Primary.type]: dynamoDBId},
@@ -255,7 +260,7 @@ export namespace User {
         export const endpoint: Endpoint = new Endpoint(
             "/user/{id}",
             "PUT",
-            async (event: APIGatewayProxyEvent ) => {
+            async (event: APIGatewayProxyEvent) => {
                 let response: Endpoint.Response
                 if (!isDefined(event.pathParameters) || !isDefined(event.pathParameters["id"])) {
                     response = {

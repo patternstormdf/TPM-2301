@@ -9,18 +9,11 @@ const tags: Application.Resource.Tag[] = [
 
 export const app = Application.new( `${App.prefixId}-app`, App.account, App.region,"Application.ts")
 
-const gsiHostCarpool: DynamoDB.Table.GSI = {
-    name: App.Table.GSI.HostCarpool.name,
-    partitionKey: App.Table.GSI.HostCarpool.Key.Primary,
-    sortKey: App.Table.GSI.HostCarpool.Key.Sort,
-    projectedAttributes: App.Table.GSI.HostCarpool.attributes
-}
-
-const gsiParticipantCarpool: DynamoDB.Table.GSI = {
-    name: App.Table.GSI.ParticipantCarpool.name,
-    partitionKey: App.Table.GSI.ParticipantCarpool.Key.Primary,
-    sortKey: App.Table.GSI.ParticipantCarpool.Key.Sort,
-    projectedAttributes: App.Table.GSI.ParticipantCarpool.attributes
+const gsiCarpoolUser: DynamoDB.Table.GSI = {
+    name: App.Table.GSI.CarpoolUser.name,
+    partitionKey: App.Table.GSI.CarpoolUser.Key.Primary,
+    sortKey: App.Table.GSI.CarpoolUser.Key.Sort,
+    projectedAttributes: App.Table.GSI.CarpoolUser.attributes
 }
 
 const gsiStatusCarpool: DynamoDB.Table.GSI = {
@@ -37,7 +30,7 @@ const table: DynamoDB.Table = DynamoDB.Table.new({
     pkType: App.Table.Key.Primary.type,
     skName: App.Table.Key.Sort.name,
     skType: App.Table.Key.Sort.type,
-    GSIs: [gsiHostCarpool, gsiParticipantCarpool, gsiStatusCarpool]
+    GSIs: [gsiCarpoolUser, gsiStatusCarpool]
 })
 const tableInstance: DynamoDB.Table.Instance = app.addResource(table) as DynamoDB.Table.Instance
 
